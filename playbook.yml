@@ -1,0 +1,96 @@
+- hosts: localhost
+  connection: local
+
+  vars:
+    pip_install_packages:
+      - name: docker
+
+  tasks:
+
+    - name: Check the version of release
+      command: hostnamectl
+      register: os_check
+      ignore_errors: yes
+      
+    - name: Install Role PIP
+      local_action: command ansible-galaxy install -f geerlingguy.pip 
+
+    - name: Install Role Docker
+      local_action: command ansible-galaxy install -f geerlingguy.docker
+
+    - name: Check if PIP is already installed
+      stat: path=/usr/bin/pip
+      register: pip_exists
+
+    - name: Check if Docker is already installed
+      stat: path=/usr/bin/docker
+      register: docker_exists
+
+    - name: Applying role PIP
+      command: mv ~/.ansible/roles/geerlingguy.pip ~/.ansible/roles/pwslab.pip
+      when: not pip_exists.stat.exists
+      ignore_errors: yes
+
+    - name: Applying role Docker
+      command: mv ~/.ansible/roles/geerlingguy.docker ~/.ansible/roles/pwslab.docker
+      when: not docker_exists.stat.exists
+      ignore_errors: yes
+
+    - name: Applying replacement on 20.04 or 8
+      lineinfile:
+          dest: ~/.ansible/roles/pwslab.pip/defaults/main.yml
+          regexp: '^pip_package: '
+          line: 'pip_package: python3-pip'
+          state: present
+      when:
+        - os_check.stdout | regex_search("CentOS Linux 8") or os_check.stdout | regex_search("Ubuntu 20")
+        - not pip_exists.stat.exists
+
+    - name: Installing PIP
+      include_role:
+        name: pwslab.pip
+      when: not pip_exists.stat.exists
+    
+    - name: Installing Docker
+      include_role:
+          name: pwslab.docker
+      when: not docker_exists.stat.exists
+
+    -   name: Installing Graphite
+        docker_container:
+          name: main_graphite
+          image: graphiteapp/graphite-statsd
+          state: started
+          restart: yes
+          restart_policy: always
+          ports:
+            - "80:80" 
+            - "2003-2004:2003-2004"
+            - "2023-2024:2023-2024" 
+            - "8125:8125/udp"
+            - "8126:8126"
+          volumes:
+            - /home/graphite/data/configs:/opt/graphite/conf
+            - /home/graphite/data/data:/opt/graphite/storage
+            - /home/graphite/data/statsd:/opt/statsd
+          keep_volumes: yes
+        when:
+          - os_check.stdout | regex_search("CentOS Linux 8") or os_check.stdout | regex_search("Ubuntu 20")
+
+    -   name: Installing Graphite
+        shell: >
+          docker run -d \
+            --name graphite \
+            --restart=always \
+            -p 80:80 \
+            -p 2003-2004:2003-2004 \
+            -p 2023-2024:2023-2024 \
+            -p 8125:8125/udp \
+            -p 8126:8126 \
+            -v /home/graphite/data/configs:/opt/graphite/conf \
+            -v /home/graphite/data/data:/opt/graphite/storage \
+            -v /home/graphite/data/statsd:/opt/statsd \
+            graphiteapp/graphite-statsd
+        when:
+          - os_check.stdout | regex_search("CentOS Linux 7") or os_check.stdout | regex_search("Ubuntu 18")
+
